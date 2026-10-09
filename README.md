@@ -5,4 +5,4 @@
 * It combines math concepts and the allure of electronic dance music and cathartic raves to increase attention and encoding.
 * If you like what you see and would like to chat more or hire me for a job, my email is legendare@berkeley.edu -- I'm Alex, a 3rd year declared in philosophy, applied math, and statistics at UC Berkeley with a minors in EECS.
 * You can also find me on instagram @ hardcore.function :)
-* thanks
+* thanks :D
