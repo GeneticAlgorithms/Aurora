@@ -1,0 +1,27 @@
+/** Shared runtime state. Modules read/write this; nothing else is global. */
+export const state = {
+  time: 0,
+  clock: 0,
+  paused: false,
+  entered: false,
+  audio: {
+    low: 0, mid: 0, high: 0, energy: 0,
+    beat: 0, drop: 0, centroid: 0,
+    active: false,
+  },
+  pointer: { x: 0.5, y: 0.5, active: false },
+  ditherMix: 0,
+  glassMode: false,
+  spin: 0,
+  flash: 0,
+  centerBloom: 0,
+  haloMul: 3.3,
+  coreMul: 1,
+  trailA: 0.3,
+  diskFlick: 1,
+  meshRGB: [150, 205, 225],
+  phase: { i: 0, name: 'pde', lt: 0, dur: 1 },
+  width: 1,
+  height: 1,
+  dpr: 1,
+};

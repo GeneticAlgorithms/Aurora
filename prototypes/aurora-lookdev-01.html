@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aurora — Look-dev 01</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #091017; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05080d; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+          image-rendering: pixelated; image-rendering: crisp-edges; }
+  #title { position: fixed; left: 26px; bottom: 22px; margin: 0;
+           font-family: "Instrument Serif", Georgia, serif; font-weight: 400;
+           font-size: 30px; letter-spacing: 0.5px; color: #dff0f2;
+           text-shadow: 0 0 18px rgba(120,200,215,0.55), 0 0 46px rgba(90,170,190,0.35);
+           opacity: 0.9; pointer-events: none; user-select: none; }
+  #title small { display:block; font-size: 13px; letter-spacing: 2px; opacity: 0.5;
+                 font-family: ui-monospace, monospace; text-transform: uppercase; text-shadow:none;}
+  #hint { position: fixed; right: 20px; bottom: 20px; margin: 0; max-width: 45vw; text-align: right;
+          font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.6;
+          color: #6f97a2; opacity: 0.55; pointer-events: none; user-select: none; }
+  kbd { color:#bfe2e8; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<h1 id="title">Aurora<small>look-dev 01</small></h1>
+<p id="hint">move cursor — stir the field ·
+  <kbd>[</kbd>/<kbd>]</kbd> flow speed ·
+  <kbd>-</kbd>/<kbd>=</kbd> dot size ·
+  <kbd>c</kbd> contrast</p>
+<script>
+(() => {
+  "use strict";
+  const view = document.getElementById("view");
+  const ctx = view.getContext("2d");
+
+  // --- palette sampled from the party-ceiling reference frames (navy -> teal -> cyan -> cream) ---
+  const PALETTE = [
+    [9, 16, 23],     // #091017  shadow / ground
+    [42, 85, 97],    // #2a5561  dark teal
+    [87, 152, 166],  // #5798a6  cyan
+    [155, 196, 195], // #9bc4c3  pale cyan
+    [238, 240, 218], // #eef0da  warm-white core
+  ];
+  const N = PALETTE.length;
+
+  // --- offscreen low-res buffer (this is what gets Floyd-Steinberg dithered) ---
+  const low = document.createElement("canvas");
+  const lctx = low.getContext("2d");
+  let W = 2, H = 2, img = null, buf = null;
+
+  // tunables (live-adjustable)
+  let dotSize = 6;      // on-screen size of one dithered cell
+  let flow = 1.0;       // flow speed multiplier
+  let contrast = 1.15;  // field contrast
+
+  function resize() {
+    view.width = innerWidth; view.height = innerHeight;
+    W = Math.max(2, Math.min(240, Math.ceil(innerWidth / dotSize)));
+    H = Math.max(2, Math.ceil(W * innerHeight / innerWidth));
+    low.width = W; low.height = H;
+    img = lctx.createImageData(W, H);
+    buf = new Float32Array(W * H);
+    ctx.imageSmoothingEnabled = false;
+  }
+  addEventListener("resize", resize);
+
+  // --- fast value-noise + FBM + domain warp (the flowing field) ---
+  function hash(x, y) {
+    let h = (x * 374761393 + y * 668265263) | 0;
+    h = (h ^ (h >> 13)) * 1274126177 | 0;
+    return ((h ^ (h >> 16)) >>> 0) / 4294967295;
+  }
+  function vnoise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+  function fbm(x, y) {
+    let s = 0, amp = 0.5, f = 1;
+    for (let i = 0; i < 4; i++) { s += amp * vnoise(x * f, y * f); f *= 2; amp *= 0.5; }
+    return s;
+  }
+  function field(x, y, t) {
+    const wx = fbm(x * 1.2 + t * 0.15, y * 1.2);
+    const wy = fbm(x * 1.2 + 5.2, y * 1.2 - t * 0.12);
+    let v = fbm(x + wx * 1.9 + t * 0.05, y + wy * 1.9 - t * 0.04);
+    v = 0.62 * v + 0.38 * fbm(x * 2.3 - wy * 1.2, y * 2.3 + wx * 1.2 + t * 0.1);
+    return v; // ~[0,1]
+  }
+
+  // cursor "stir" (a teaser for the audio-excitation hook)
+  let mx = -999, my = -999;
+  addEventListener("pointermove", e => { mx = e.clientX / innerWidth; my = e.clientY / innerHeight; });
+  addEventListener("pointerleave", () => { mx = -999; my = -999; });
+
+  addEventListener("keydown", e => {
+    if (e.key === "[") flow = Math.max(0, flow - 0.15);
+    else if (e.key === "]") flow = Math.min(4, flow + 0.15);
+    else if (e.key === "-" || e.key === "_") { dotSize = Math.min(16, dotSize + 1); resize(); }
+    else if (e.key === "=" || e.key === "+") { dotSize = Math.max(2, dotSize - 1); resize(); }
+    else if (e.key.toLowerCase() === "c") contrast = contrast >= 1.6 ? 0.8 : contrast + 0.2;
+  });
+
+  let t = 0, last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt * flow;
+
+    // 1) evaluate the flowing field into the scalar buffer
+    const scale = 3.4, aspect = H / W;
+    const cmx = mx * W, cmy = my * H, stirR = 0.22 * W;
+    for (let y = 0; y < H; y++) {
+      const ny = (y / H) * scale * (innerHeight / innerWidth) * (W / H); // keep isotropic-ish
+      for (let x = 0; x < W; x++) {
+        const nx = (x / W) * scale;
+        let v = field(nx, ny, t);
+        // high-key bias so bright billows dominate like the reference
+        v = Math.pow(Math.min(1, Math.max(0, (v - 0.28) * contrast + 0.35)), 0.9);
+        // top of frame a touch brighter (projected ceiling)
+        v += (1 - y / H) * 0.10;
+        // cursor stir
+        if (mx > -1) {
+          const dx = x - cmx, dy = y - cmy, d2 = dx * dx + dy * dy;
+          v += 0.55 * Math.exp(-d2 / (stirR * stirR));
+        }
+        buf[y * W + x] = Math.min(1, Math.max(0, v));
+      }
+    }
+
+    // 2) authentic Floyd-Steinberg error diffusion -> palette ramp
+    const data = img.data;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const oldv = buf[i];
+        let level = Math.round(oldv * (N - 1));
+        if (level < 0) level = 0; else if (level > N - 1) level = N - 1;
+        const newv = level / (N - 1);
+        const err = oldv - newv;
+        if (x + 1 < W) buf[i + 1] += err * 7 / 16;
+        if (y + 1 < H) {
+          if (x > 0) buf[i + W - 1] += err * 3 / 16;
+          buf[i + W] += err * 5 / 16;
+          if (x + 1 < W) buf[i + W + 1] += err * 1 / 16;
+        }
+        const c = PALETTE[level];
+        const p = i * 4;
+        data[p] = c[0]; data[p + 1] = c[1]; data[p + 2] = c[2]; data[p + 3] = 255;
+      }
+    }
+    lctx.putImageData(img, 0, 0);
+
+    // 3) upscale chunky to the display
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(low, 0, 0, W, H, 0, 0, view.width, view.height);
+
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
